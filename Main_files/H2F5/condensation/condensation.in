@@ -1,0 +1,120 @@
+#-------------------------------------------#
+units           real
+atom_style      full
+boundary        p p p
+neighbor        2.0 bin
+neigh_modify    every 1 delay 0 check yes one 10000
+#---------------------------------#
+pair_style      lj/cut/coul/long 12.0 12.0
+pair_modify     mix arithmetic
+kspace_style    pppm 1.0e-4
+
+bond_style      harmonic
+angle_style     harmonic
+dihedral_style  fourier
+special_bonds   amber
+#--------------------------------#
+read_data       condensation.data
+#-------------------------------------#
+group           water type 7 8
+group           oxygen type 8
+group           CO2 type 9 10
+group           gas type 7 8 9 10
+group           down type 1:6:1
+group           wall type 1:6:1
+group           up type 11
+group           minimize union wall up
+#---------------------------------#
+variable        i equal 2
+variable        ransed equal 2022520+${i}         
+variable        Tstart equal 520
+variable        Tend equal 340
+variable        alpha equal 0.15
+variable        epsilon equal v_alpha*(0.1553*4.72)^0.5
+print           "epsilon_water_Cu = ${epsilon}"
+
+variable        alpha_CO2 equal 0.15
+variable        epsilon_C equal v_alpha_CO2*(0.0559*4.72)^0.5
+print           "epsilon_C_Cu = ${epsilon_C}"
+variable        epsilon_O equal v_alpha_CO2*(0.1599*4.72)^0.5
+print           "epsilon_O_Cu = ${epsilon_O}"
+#----------------------------------#
+pair_coeff      8 11 ${epsilon} 2.891
+pair_coeff      9 11 ${epsilon_C} 2.6865
+pair_coeff      10 11 ${epsilon_O} 2.8245
+#----------------------------------#
+# fix             nomove minimize setforce 0 0 0
+# minimize        0.0 1.0e-8 1000 100000
+# min_style       cg
+# unfix           nomove
+# write_data      minimize.data
+#----------------------------------#
+fix             SHAKE gas shake 0.0001 50 0 b 6 7 a 11
+#----------------------------------#
+timestep        1
+#----------------------------#
+region          nomove_down block INF INF INF INF INF 5 units box
+group           nomove_down region nomove_down
+group           SPRING region nomove_down
+
+region          nomove_up block INF INF INF INF 323 INF units box
+group           nomove_up region nomove_up
+region          heat_up block INF INF INF INF 319 322 units box
+group           heat_up region heat_up
+region          convey_up block INF INF INF INF 316 319 units box
+group           convey_up region convey_up
+group           SPRING_up subtract up nomove_up
+
+group           NVEgroup subtract all nomove_up
+#--------------------------#
+velocity        water create ${Tstart} ${ransed} mom yes rot yes dist gaussian
+velocity        CO2 create ${Tstart} ${ransed} mom yes rot yes dist gaussian
+velocity        wall create ${Tstart} ${ransed} mom yes rot yes dist gaussian
+velocity        SPRING_up create ${Tstart} ${ransed} mom yes rot yes dist gaussian
+#--------------------------------#
+velocity        nomove_up set 0.0 0.0 0.0 units box
+fix             2 nomove_up setforce 0.0 0.0 0.0
+#------------------------------------#
+fix             pull_down SPRING spring/self 59.75
+fix             pull_up SPRING_up spring/self 67.68
+#------------------------------------#
+compute         watert water temp
+compute         CO2t CO2 temp
+compute         wallt wall temp
+compute         heatt_up heat_up temp
+compute         conveyt_up convey_up temp
+#-------------------------------------#
+compute         C oxygen coord/atom cutoff 3.36 group oxygen
+#-------------------------------------------#
+log             SAM.lammps
+thermo          10000
+thermo_style    custom step temp c_watert c_CO2t c_wallt c_heatt_up c_conveyt_up press
+thermo_modify   flush yes
+#---------------------------------------#
+dump            DUMP all custom 10000 relaxation.lammpstrj id type x y z c_C element
+dump_modify     DUMP element C H H S F H H O C O Cu
+fix             NVT_spring_down wall nvt temp ${Tstart} ${Tstart} 100
+fix             NVT_water water nvt temp ${Tstart} ${Tstart} 100
+fix             NVT_CO2 CO2 nvt temp ${Tstart} ${Tstart} 100
+fix             NVT_spring_up SPRING_up nvt temp ${Tstart} ${Tstart} 100
+run             1000000
+unfix           NVT_spring_down
+unfix           NVT_water
+unfix           NVT_CO2
+unfix           NVT_spring_up
+undump          DUMP
+#---------------------------------------#
+dump            DUMP all custom 10000 condensation.lammpstrj id type x y z c_C vx vy vz element
+dump_modify     DUMP element C H H S F H H O C O Cu
+#---------------------------------------#
+fix             NVE all nve
+fix             DOWN wall langevin ${Tend} ${Tend} 100 202138
+fix             UP heat_up langevin ${Tstart} ${Tstart} 100 020520
+run             1000000
+write_restart   condensation.equil
+
+
+
+
+
+
